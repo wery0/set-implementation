@@ -1,117 +1,322 @@
-#include <iostream>
-
+/*
+ * Template analogue of std::set, based on AVL tree.
+ * Template type must have operator <.
+ * It supports standard set operations in guaranteed O(log(tree_size)):
+ * - insert
+ * - erase
+ * - find
+ * - lower_bound
+ */
 template<class T>
-class Avl {
-private:
+class Set {
+  public:
+    
+    // Invariant of root!=null is needed for always having node, representing end() iterator.
+    Set() { root = new Node(); }
 
+    Set(const Set<T>& other) {
+        root = new Node();
+        for (const T& val : other) {
+            insert(val);
+        }
+    }
+
+    // Assignment operator
+    Set& operator=(const Set& other) {
+        if (&other == this) {
+            return *this;
+        }
+        destroy();
+        root->left = nullptr;
+        node_count = 0;
+        for (T val : other) {
+            insert(val);
+        }
+        return *this;
+    }
+
+    Set(const std::initializer_list<T>& elems) {
+        root = new Node();
+        for (const T& val : elems) {
+            insert(val);
+        }
+    }
+
+    template<typename Iterator>
+    Set(const Iterator first, const Iterator last) {
+        root = new Node();
+        for (Iterator it = first; it != last; ++it) {
+            insert(*it);
+        }
+    }
+
+    class iterator;
+
+    // If needed value exists, returns iterator on corresponding node, otherwise end().
+    iterator find(const T& val) const {
+        Node* cur = root->left;
+        while (cur != nullptr) {
+            if (val < cur->value) {
+                cur = cur->left;
+            } else if (cur->value < val) {
+                cur = cur->right;
+            } else {
+                return iterator(cur);
+            }
+        }
+        return end();
+    }
+
+    // Returns iterator on node with the lowest key >= val.
+    iterator lower_bound(const T& val) const {
+        Node* cur = root->left;
+        Node* ans = root;
+        while (cur) {
+            if (cur->value < val) {
+                cur = cur->right;
+            } else {
+                ans = cur;
+                cur = cur->left;
+            }
+        }
+        return iterator(ans);
+    }
+
+    iterator begin() const {
+        Node* ans = root;
+        while (ans->left) {
+            ans = ans->left;
+        }
+        return iterator(ans);
+    }
+
+    iterator end() const { return iterator(root); }
+
+    // Inserts element in tree. If such exists, does nothing.
+    void insert(const T& val) {
+        root->left = recursive_insert(root->left, val);
+        root->left->parent = root;
+    }
+
+    // Erases element from tree. If such doesn't exist, does nothing.
+    void erase(const T& val) {
+        root->left = recursive_erase(root->left, val);
+        if (root->left) root->left->parent = root;
+    }
+
+    size_t size() const { return node_count; }
+
+    bool empty() const { return node_count == 0; }
+
+    ~Set() { destroy(root); }
+
+  private:
+    // Auxiliary class for storing node's information.
     struct Node {
-        Node *parent = nullptr;
-        Node *left = nullptr;
-        Node *right = nullptr;
-        int32_t height = -1;
+        static constexpr int32_t UNDEFINED = -1;
+        static constexpr int32_t LEFT = 0;
+        static constexpr int32_t RIGHT = -1;
+        Node* parent = nullptr;
+        Node* left = nullptr;
+        Node* right = nullptr;
+        int32_t height = UNDEFINED;
         T value;
 
         Node() = default;
 
-        explicit Node(T val) {
+        explicit Node(const T& val) {
             value = val;
             height = 0;
         }
 
-        explicit Node(Node *n) {
-            parent = n->parent;
-            left = n->left;
-            right = n->right;
-            height = n->height;
-            value = n->value;
+        explicit Node(Node* other) {
+            parent = other->parent;
+            left = other->left;
+            right = other->right;
+            height = other->height;
+            value = other->value;
         }
     };
 
-    size_t node_count = 0;
-    Node *root = new Node();
+  public:
+    /*
+     * Bidirectional iterator for AVL tree nodes
+     * Doesn't support random access
+     * Prefix/postfix increment/decrement works in amortized O(1)
+     * */
+    class iterator {
+      public:
+        iterator() = default;
 
-    Node *get_leftest_node(Node *n) {
-        for (; n->left != nullptr;) {
-            n = n->left;
+        explicit iterator(Node* node_) { node = node_; }
+
+        bool operator==(const iterator& it) const { return it.node == node; }
+
+        bool operator==(const iterator&& it) const { return it.node == node; }
+
+        bool operator!=(const iterator& it) const { return it.node != node; }
+
+        bool operator!=(const iterator&& it) const { return it.node != node; }
+
+        T operator*() const { return node->value; }
+
+        T* operator->() const { return &node->value; }
+
+        iterator& operator++() {
+            node = get_next_vertex(node);
+            return *this;
         }
-        return n;
+
+        iterator operator++(int) {
+            iterator temp = iterator(node);
+            ++(*this);
+            return temp;
+        }
+
+        iterator& operator--() {
+            node = get_prev_vertex(node);
+            return *this;
+        }
+
+        iterator operator--(int) {
+            iterator temp = iterator(node);
+            --(*this);
+            return temp;
+        }
+
+      private:
+        int get_parent_direction(Node* child) {
+            return child->parent->left == child ? Node::LEFT : Node::RIGHT;
+        }
+
+        Node* get_leftest_node(Node* node) {
+            while (node->left != nullptr) {
+                node = node->left;
+            }
+            return node;
+        }
+
+        Node* get_rightest_node(Node* node) {
+            while (node->right) {
+                node = node->right;
+            }
+            return node;
+        }
+
+        // Auxiliary method for finding next node in tree.
+        Node* get_next_vertex(Node* node) {
+            if (node->right != nullptr) {
+                return get_leftest_node(node->right);
+            }
+            while (node->parent) {
+                int32_t dir = get_parent_direction(node);
+                node = node->parent;
+                if (dir == Node::LEFT) {
+                    return node;
+                }
+            }
+            return nullptr;
+        }
+
+        // Auxiliary method for finding previous node in tree.
+        Node* get_prev_vertex(Node* node) {
+            if (node->left != nullptr) {
+                return get_rightest_node(node->left);
+            }
+            while (node->parent) {
+                int32_t dir = get_parent_direction(node);
+                node = node->parent;
+                if (dir == Node::RIGHT) {
+                    return node;
+                }
+            }
+            return nullptr;
+        }
+
+        Node* node = nullptr;
+    };
+
+  private:
+    Node* get_leftest_node(Node* node) {
+        while (node->left != nullptr) {
+            node = node->left;
+        }
+        return node;
     }
 
-    int32_t get_height(Node *n) {
-        return n == nullptr ? -1 : n->height;
+    int32_t get_height(Node* node) { return node == nullptr ? Node::UNDEFINED : node->height; }
+
+    int32_t height_difference(Node* node) {
+        return node ? get_height(node->left) - get_height(node->right) : 0;
     }
 
-    int32_t height_difference(Node *n) {
-        return n ? get_height(n->left) - get_height(n->right) : 0;
-    }
-
-    void destroy(Node *n) {
-        if (n == nullptr) {
+    // Auxiliary function for deleting tree and releasing memory.
+    void destroy(Node* node) {
+        if (node == nullptr) {
             return;
         }
-        destroy(n->left);
-        destroy(n->right);
-        delete n;
+        destroy(node->left);
+        destroy(node->right);
+        delete node;
     }
 
-    void destroy() {
-        destroy(root->left);
-    }
+    void destroy() { destroy(root->left); }
 
-    void update_height(Node *node) {
+    void update_height(Node* node) {
         node->height = 1 + std::max(get_height(node->left), get_height(node->right));
     }
 
-    Node *left_rotate(Node *a) {
-        Node *b = a->right;
-        a->right = b->left;
-        if (b->left) {
-            b->left->parent = a;
+    Node* left_rotate(Node* node) {
+        Node* temp = node->right;
+        node->right = temp->left;
+        if (temp->left) {
+            temp->left->parent = node;
         }
-        b->left = a;
-        b->parent = a->parent;
-        a->parent = b;
-        update_height(a);
-        update_height(b);
-        return b;
+        temp->left = node;
+        temp->parent = node->parent;
+        node->parent = temp;
+        update_height(node);
+        update_height(temp);
+        return temp;
     }
 
-    Node *right_rotate(Node *a) {
-        Node *b = a->left;
-        a->left = b->right;
-        if (b->right) {
-            b->right->parent = a;
+    Node* right_rotate(Node* node) {
+        Node* temp = node->left;
+        node->left = temp->right;
+        if (temp->right) {
+            temp->right->parent = node;
         }
-        b->right = a;
-        b->parent = a->parent;
-        a->parent = b;
-        update_height(a);
-        update_height(b);
-        return b;
+        temp->right = node;
+        temp->parent = node->parent;
+        node->parent = temp;
+        update_height(node);
+        update_height(temp);
+        return temp;
     }
 
-    Node *big_left_rotate(Node *n) {
-        n->right = right_rotate(n->right);
-        return left_rotate(n);
+    Node* big_left_rotate(Node* node) {
+        node->right = right_rotate(node->right);
+        return left_rotate(node);
     }
 
-    Node *big_right_rotate(Node *n) {
-        n->left = left_rotate(n->left);
-        return right_rotate(n);
+    Node* big_right_rotate(Node* node) {
+        node->left = left_rotate(node->left);
+        return right_rotate(node);
     }
 
-    Node *rotate(Node *node) {
+    // Standard AVL's rotate implementation.
+    Node* rotate(Node* node) {
         int32_t n_diff = height_difference(node);
         int32_t l_diff = height_difference(node->left);
         int32_t r_diff = height_difference(node->right);
-        if (n_diff == -2) {
-            if (r_diff == 1) {
+        if (n_diff == -TWO) {
+            if (r_diff == ONE) {
                 node = big_left_rotate(node);
             } else {
                 node = left_rotate(node);
             }
-        } else if (n_diff == 2) {
-            if (l_diff == -1) {
+        } else if (n_diff == TWO) {
+            if (l_diff == -ONE) {
                 node = big_right_rotate(node);
             } else {
                 node = right_rotate(node);
@@ -120,7 +325,8 @@ private:
         return node;
     }
 
-    Node *recursive_erase(Node *node, T val) {
+    // Auxiliary function for erasing element from tree.
+    Node* recursive_erase(Node* node, const T& val) {
         if (node == nullptr) {
             return node;
         }
@@ -136,14 +342,14 @@ private:
             }
         } else {
             if (node->left && node->right) {
-                Node *temp = get_leftest_node(node->right);
+                Node* temp = get_leftest_node(node->right);
                 node->value = temp->value;
                 node->right = recursive_erase(node->right, temp->value);
                 if (node->right) {
                     node->right->parent = node;
                 }
             } else {
-                Node *temp = node->left ? node->left : node->right;
+                Node* temp = node->left ? node->left : node->right;
                 delete node;
                 --node_count;
                 node = temp;
@@ -160,7 +366,8 @@ private:
         return node;
     }
 
-    Node *recursive_insert(Node *node, T val) {
+    // Auxiliary function for inserting element from tree.
+    Node* recursive_insert(Node* node, const T& val) {
         if (node == nullptr) {
             node = new Node(val);
             ++node_count;
@@ -176,277 +383,8 @@ private:
         return node;
     }
 
-public:
-
-    class iterator {
-    public:
-        iterator() = default;
-
-        explicit iterator(Node *node_) {
-            node = node_;
-        }
-
-        bool operator==(iterator &it) const {
-            return it.node == node;
-        }
-
-        bool operator==(iterator &&it) const {
-            return it.node == node;
-        }
-
-        bool operator!=(iterator &it) const {
-            return it.node != node;
-        }
-
-        bool operator!=(iterator &&it) const {
-            return it.node != node;
-        }
-
-        T operator*() const {
-            return node->value;
-        }
-
-        T *operator->() const {
-            return &node->value;
-        }
-
-        iterator &operator++() {
-            node = get_next_vertex(node);
-            return *this;
-        }
-
-        iterator operator++(int) {
-            iterator temp = iterator(node);
-            ++(*this);
-            return temp;
-        }
-
-        iterator &operator--() {
-            node = get_prev_vertex(node);
-            return *this;
-        }
-
-        iterator operator--(int) {
-            iterator temp = iterator(node);
-            --(*this);
-            return temp;
-        }
-
-    private:
-
-        int get_parent_direction(Node *child) {
-            return child->parent->left == child ? 0 : 1;
-        }
-
-        Node *get_leftest_node(Node *n) {
-            for (; n->left != nullptr;) {
-                n = n->left;
-            }
-            return n;
-        }
-
-        Node *get_rightest_node(Node *n) {
-            for (; n->right;) {
-                n = n->right;
-            }
-            return n;
-        }
-
-        Node *get_next_vertex(Node *n) {
-            if (n->right != nullptr) {
-                return get_leftest_node(n->right);
-            }
-            for (; n->parent;) {
-                int32_t dir = get_parent_direction(n);
-                n = n->parent;
-                if (dir == 0) {
-                    return n;
-                }
-            }
-            return nullptr;
-        }
-
-        Node *get_prev_vertex(Node *n) {
-            if (n->left != nullptr) {
-                return get_rightest_node(n->left);
-            }
-            for (; n->parent;) {
-                int32_t dir = get_parent_direction(n);
-                n = n->parent;
-                if (dir == 1) {
-                    return n;
-                }
-            }
-            return nullptr;
-        }
-
-        Node *node;
-    };
-
-    Avl() = default;
-
-    Avl(const Avl<T> &other) {
-        for (T val: other) {
-            insert(val);
-        }
-    }
-
-    Avl &operator=(const Avl &other) {
-        if (&other == this) {
-            return *this;
-        }
-        destroy();
-        root->left = nullptr;
-        node_count = 0;
-        for (T val: other) {
-            insert(val);
-        }
-        return *this;
-    }
-
-    Avl(std::initializer_list<T> elems) {
-        for (T val: elems) {
-            insert(val);
-        }
-    }
-
-    template<typename Iterator>
-    Avl(Iterator first, Iterator last) {
-        for (Iterator it = first; it != last; ++it) {
-            insert(*it);
-        }
-    }
-
-    iterator find(const T &val) const {
-        Node *n = root->left;
-        for (; n != nullptr;) {
-            if (val < n->value) {
-                n = n->left;
-            } else if (n->value < val) {
-                n = n->right;
-            } else {
-                return iterator(n);
-            }
-        }
-        return end();
-    }
-
-    iterator lower_bound(const T &val) const {
-        Node *n = root->left;
-        Node *ans = root;
-        for (; n;) {
-            if (n->value < val) {
-                n = n->right;
-            } else {
-                ans = n;
-                n = n->left;
-            }
-        }
-        return iterator(ans);
-    }
-
-    iterator begin() const {
-        Node *ans = root;
-        for (; ans->left;) {
-            ans = ans->left;
-        }
-        return iterator(ans);
-    }
-
-    iterator end() const {
-        return iterator(root);
-    }
-
-    void insert(T val) {
-        root->left = recursive_insert(root->left, val);
-        root->left->parent = root;
-    }
-
-    void erase(T val) {
-        root->left = recursive_erase(root->left, val);
-        if (root->left) root->left->parent = root;
-    }
-
-    size_t size() const {
-        return node_count;
-    }
-
-    bool empty() const {
-        return node_count == 0;
-    }
-
-    ~Avl() {
-        destroy(root);
-    }
-};
-
-template<class T>
-class Set {
-private:
-    Avl<T> avl;
-public:
-
-    Set() = default;
-
-    Set(const Set<T> &other) {
-        avl = other.avl;
-    }
-
-    Set &operator=(const Set &other) {
-        avl = other.avl;
-        return *this;
-    }
-
-    Set(std::initializer_list<T> elems) {
-        avl = elems;
-    }
-
-    template<typename Iterator>
-    Set(Iterator first, Iterator last) {
-        avl = Avl<T>(first, last);
-    }
-
-    typedef typename Avl<T>::iterator iterator;
-
-    iterator find(const T &val) const {
-        return avl.find(val);
-    }
-
-    iterator lower_bound(const T &val) const {
-        return avl.lower_bound(val);
-    }
-
-    iterator begin() {
-        return avl.begin();
-    }
-
-    iterator end() {
-        return avl.end();
-    }
-
-    iterator begin() const {
-        return avl.begin();
-    }
-
-    iterator end() const {
-        return avl.end();
-    }
-
-    void insert(T val) {
-        avl.insert(val);
-    }
-
-    void erase(T val) {
-        avl.erase(val);
-    }
-
-    size_t size() const {
-        return avl.size();
-    }
-
-    bool empty() const {
-        return avl.empty();
-    }
-
-    ~Set() = default;
+    size_t node_count = 0;
+    Node* root;
+    static constexpr int32_t ONE = 1;
+    static constexpr int32_t TWO = 2;
 };
